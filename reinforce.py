@@ -55,7 +55,7 @@ def plotPerformance(avg_loss_list, step_counter_list):
     if len(y1) <= 300:
         window_len = 5
     else:
-        51
+        window_len = 51
     y1_smooth = savgol_filter(y1, window_len, 3)
     y2_smooth = savgol_filter(y2, window_len, 3)
 
@@ -71,7 +71,7 @@ def plotPerformance(avg_loss_list, step_counter_list):
     ax2.set_ylabel('average loss')
     plt.savefig(FIG_FILE)
 
-class PolicyNet():
+class Net():
     def __init__(self, N_STATES, N_ACTIONS) -> None:
         self.N_STATES = N_STATES
         self.N_ACTIONS = N_ACTIONS
@@ -84,13 +84,11 @@ class PolicyNet():
     
 class ReinforceAgent():
     def __init__(self, N_STATES, N_ACTIONS):
-        nn = PolicyNet(N_STATES, N_ACTIONS)
-        # self.model = MakeModel(2)
+        nn = Net(N_STATES, N_ACTIONS)
         self.model = nn.net_fc()
         self.S_buffer = []
         self.A_buffer = []
         self.R_buffer = []
-        self.optim = OPTIM
         self.N_STATES = N_STATES
         self.N_ACTIONS = N_ACTIONS
     
