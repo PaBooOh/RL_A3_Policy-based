@@ -14,6 +14,7 @@ from tensorflow.keras.layers import Dense
 from tensorflow.keras import Sequential
 from tensorflow.keras.optimizers import Adam
 from scipy.signal import savgol_filter
+from scipy.interpolate import make_interp_spline
 
 # (Hyper)parameters
 #--------------------------------------------------------Trainning
@@ -30,45 +31,37 @@ ENVNAME = 'CartPole-v1'
 #--------------------------------------------------------Plot
 avg_list = []
 step_list = []
-FIG_FILE = 'Lr={}, GAMMA={}, time={}_.png'.format(LR, GAMMA, datetime.now().strftime("%m%d%Y%H%M%S"))
+FIG_FILE = 'Reinforce__Lr={}, GAMMA={}, time={}_.png'.format(LR, GAMMA, datetime.now().strftime("%m%d%Y%H%M%S"))
 
 def handler(signum, frame):
     msg = "Ctrl-C was pressed. Screenshot was saved at the current local folder. \n"
     print()
     print(msg, end="", flush=True)
-    plotPerformance(avg_list, step_list)
+    plotPerformance(step_list)
     sys.exit(1)
 
-def plotPerformance(avg_loss_list, step_counter_list):
-    cut = 0
-    for i in range(len(avg_loss_list)):
-        if not math.isnan(avg_loss_list[i]):
-            # print(i)
-            cut = i
-            break
-    step_counter_list = step_counter_list[cut:]
-    avg_loss_list = avg_loss_list[cut:]
-    x = np.arange(0,len(step_counter_list))
+def plotPerformance(step_counter_list):
+    
+    x = np.arange(0, len(step_counter_list))
     y1 = step_counter_list
-    y2 = avg_loss_list
-
+    # x_sm = np.array(x)
+    # y1_sm = np.array(y1)
+    # spline = make_interp_spline(x_sm, y1_sm)
+    
+    # x_smooth = x
+    # y1_smooth = spline(x_smooth)
     if len(y1) <= 300:
         window_len = 5
     else:
         window_len = 51
-    y1_smooth = savgol_filter(y1, window_len, 3)
-    y2_smooth = savgol_filter(y2, window_len, 3)
+    y1_smooth = savgol_filter(y1, window_len, 2)
 
     fig, ax1 = plt.subplots()
-    ax2 = ax1.twinx()
-    ax1.plot(x, y1_smooth, 'g-',label='total steps')
-    ax2.plot(x, y2_smooth, 'b--',label='average loss')
-    ax1.legend(loc='upper left')
-    ax2.legend(loc='upper right')
+    ax1.plot(x, y1_smooth, label='Total steps')
+    ax1.legend(loc='upper right')
 
     ax1.set_xlabel('Training episode')
-    ax1.set_ylabel('total steps')
-    ax2.set_ylabel('average loss')
+    ax1.set_ylabel('Total steps')
     plt.savefig(FIG_FILE)
 
 class Net():
@@ -107,14 +100,22 @@ class ReinforceAgent():
     def calReturns(self):
         returns_G = []
         episode_R = self.R_buffer
-        for i in range(len(episode_R)):
-            return_G = 0
-            pow = 0
-            for R in episode_R[i:]:
-                return_G += R * GAMMA ** pow
-                pow += 1
-            returns_G.append(return_G)
-        # returns_G = (returns_G - np.mean(returns_G)) / (np.std(returns_G) + 1e-10) # normilization
+        # (1) Gt is calculated based on 1-step target bootstrapping
+        cumulative_R = 0
+        for R in reversed(episode_R):
+            cumulative_R = R + GAMMA * cumulative_R
+            returns_G.append(cumulative_R)
+        returns_G.reverse()
+
+        # (2) Gt is calculated based on MC 
+        # for i in range(len(episode_R)):
+        #     return_G = 0
+        #     pow = 0
+        #     for R in episode_R[i:]:
+        #         return_G += R * GAMMA ** pow
+        #         pow += 1
+        #     returns_G.append(return_G)
+        # returns_G = (returns_G - np.mean(returns_G)) / (np.std(returns_G) + 1e-9) # normilization
         return returns_G # R1, R2, ... , Rt.
     
     def calLoss(self, S, A, R): 
@@ -125,18 +126,18 @@ class ReinforceAgent():
 
     def training(self):
         returns_G = self.calReturns()
-        losses = []
+        # losses = []
         for S, A, R in zip(self.S_buffer, self.A_buffer, returns_G):
             with GradientTape() as gt:
                 loss = self.calLoss(S, A, R)
                 grads = gt.gradient(loss, self.model.trainable_variables)
                 OPTIM.apply_gradients(zip(grads, self.model.trainable_variables))
-                losses.append(loss)
+                # losses.append(loss)
 
         self.S_buffer = []
         self.A_buffer = []
         self.R_buffer = []
-        return np.mean(losses)
+        # return np.mean(losses)
 
 def main():
     global avg_list # For plotting
@@ -147,7 +148,6 @@ def main():
     reinforce_agent = ReinforceAgent(N_STATES, N_ACTIONS)
     step_counts_list = [] # for recording the number of the step the agent do in each game
     scores = [] # for recording the cumulative rewards in each game
-    avg_loss_list = [] # for recording the change in loss when training
     win_most_recent = deque(maxlen=CONSECUTIVES) # for 'early-stopping'
     # Playing
     for episode in range(EPISODES):
@@ -171,33 +171,28 @@ def main():
                     R = -R # If fail, suffer punishment
             else:
                 R = R
-            reinforce_agent.appendBuffer(S, A, R) # Replay buffer
+            reinforce_agent.appendBuffer(S, A, R)
             S = S_next
             total_R += R
 
             # End if there are enough winnings.
             if terminal:
-                # Dqn_agent.target_model.set_weights(Dqn_agent.original_model.get_weights()) # Update target model every episode
                 win_most_recent.append(step_counts)
                 step_counts_list.append(step_counts)
                 break
         
         # Training
-        avg_losses = reinforce_agent.training()
+        reinforce_agent.training()
         # Recording
         scores.append(total_R)
-        avg_loss_list.append(avg_losses)
-        avg_list = avg_loss_list
         step_list = step_counts_list
         print("Episode: {}, Total reward: {}, Total step: {}".format(episode, total_R, step_counts_list[-1]))
-    # print('Scores: ', scores)
-    # print('Steps: ', step_counts_list)
-    return avg_loss_list, step_counts_list
+    return step_counts_list
     
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, handler)
     a = time.time()
-    avg_loss_list, step_counts_list = main()
+    step_counts_list = main()
     b = time.time()
     print('Total time', b - a)
-    plotPerformance(avg_loss_list, step_counts_list)
+    plotPerformance(step_counts_list)
